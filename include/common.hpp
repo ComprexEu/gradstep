@@ -14,7 +14,20 @@ struct Dataset {
     std::vector<float> X;       // row-major: feature j of sample i is X[i*F + j]
     std::vector<float> y;
     std::vector<float> w_true;  // parameters the data was generated from (P values)
+    std::vector<float> Xs;      // column-major copy for the AVX version: Xs[j*ld + i]
+    long long ld = 0;           // distance between columns of Xs, see make_columns
 };
+
+// The AVX version wants one feature of many samples next to each other,
+// so it reads this column-major copy of X instead.
+// The columns are n + 16 floats apart, not n: for n = 2^20 all 16 columns would
+// start at addresses that map to the same cache sets and evict each other.
+inline void make_columns(Dataset& d) {
+    d.ld = d.n + 16;
+    d.Xs.assign(F * d.ld, 0.0f);
+    for (long long i = 0; i < d.n; i++)
+        for (int j = 0; j < F; j++) d.Xs[j * d.ld + i] = d.X[i * F + j];
+}
 
 // y = w_true·x + b_true + noise. Because w_true is known, training can be checked
 // against it; the noise (sigma = 0.1) puts the best reachable MSE at about 0.01.
@@ -38,11 +51,12 @@ inline Dataset make_dataset(long long n, unsigned seed = 42) {
         }
         d.y[i] = (float)acc + noise(rng);
     }
+    make_columns(d);
     return d;
 }
 
-// File layout: n, w_true[P], X[n*F], y[n]. Saving the data lets another run
-// (or another machine) be measured on exactly the same input.
+// File layout: n, w_true[P], X[n*F], y[n]. Saving the data lets later versions
+// (AVX) be measured on exactly the same input.
 inline bool save_dataset(const Dataset& d, const std::string& path) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -66,11 +80,12 @@ inline bool load_dataset(Dataset& d, const std::string& path) {
              fread(d.y.data(), sizeof(float), d.y.size(), f) == d.y.size();
     }
     fclose(f);
+    if (ok) make_columns(d);
     return ok;
 }
 
 // Same gradient sums as grad_scalar, but accumulated in double: this is the
-// ground truth the float version is compared against.
+// ground truth every faster version is compared against.
 inline std::vector<double> reference_grad(const Dataset& d, const std::vector<float>& w) {
     std::vector<double> g(P, 0.0);
     for (long long i = 0; i < d.n; i++) {
@@ -94,8 +109,8 @@ inline double mse(const Dataset& d, const std::vector<float>& w) {
     return loss / d.n;
 }
 
-// Float sums of a million terms never match the double reference exactly,
-// so we need a tolerance.
+// Float sums of a million terms never match the double reference exactly, and
+// the AVX version adds in a different order, so we need a tolerance.
 // The error is divided by the largest gradient component rather than by each
 // component, so a component that happens to be near 0 can't inflate the result.
 inline double max_rel_error(const float* g, const std::vector<double>& ref) {

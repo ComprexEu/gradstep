@@ -1,3 +1,4 @@
+#include "avx2.hpp"
 #include "scalar.hpp"
 #include <chrono>
 #include <cstdlib>
@@ -65,6 +66,11 @@ int main(int argc, char** argv) {
     std::vector<Version> versions = {
         {"scalar", [&](const float* w, float* g) { grad_scalar(d, w, g); }},
     };
+    if (cpu_has_avx2()) {
+        versions.push_back({"avx2", [&](const float* w, float* g) { grad_avx2(d.Xs.data(), d.ld, d.y.data(), n, w, g); }});
+    } else {
+        printf("CPU without AVX2: skipping avx2\n");
+    }
 
     std::vector<float> w(P, 0.0f);
     auto ref = reference_grad(d, w);
@@ -91,7 +97,7 @@ int main(int argc, char** argv) {
     if (!csv.empty()) printf("Results appended to %s\n", csv.c_str());
 
     // Repeated steps must recover the parameters the data was generated from.
-    // Uses the last version in the list; its gradient was already checked above.
+    // Uses the last (fastest) version; its gradient was already checked above.
     if (train > 0) {
         const Version& v = versions.back();
         printf("\nTraining for %d steps with %s (lr = 0.5):\n", train, v.name);
