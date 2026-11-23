@@ -23,7 +23,7 @@ struct Dataset {
 // The columns are n + 16 floats apart, not n: for n = 2^20 all 16 columns would
 // start at addresses that map to the same cache sets and evict each other.
 inline void make_columns(Dataset& d) {
-    d.ld = d.n + 1040 //d.n + 16;
+    d.ld = d.n + 1040; //d.n + 16;
     d.Xs.assign(F * d.ld, 0.0f);
     for (long long i = 0; i < d.n; i++)
         for (int j = 0; j < F; j++) d.Xs[j * d.ld + i] = d.X[i * F + j];
