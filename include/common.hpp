@@ -20,10 +20,14 @@ struct Dataset {
 
 // The AVX version wants one feature of many samples next to each other,
 // so it reads this column-major copy of X instead.
-// The columns are n + 16 floats apart, not n: for n = 2^20 all 16 columns would
-// start at addresses that map to the same cache sets and evict each other.
+// The columns are n + 1040 floats apart, not n. For n = 2^20 the columns would be
+// exactly 4 MB apart, so the 16 columns read together by the AVX loop would share
+// the same low address bits and collide: in L1 cache sets (bits 6-11) and further
+// down, e.g. in DRAM banks (higher bits). +16 floats (one 64 B line) fixes only L1;
+// 1040 floats = 4096 B + 64 B shifts each column by one page and one line, so both
+// the low and the higher address bits differ between columns.
 inline void make_columns(Dataset& d) {
-    d.ld = d.n + 1040 //d.n + 16;
+    d.ld = d.n + 1040;
     d.Xs.assign(F * d.ld, 0.0f);
     for (long long i = 0; i < d.n; i++)
         for (int j = 0; j < F; j++) d.Xs[j * d.ld + i] = d.X[i * F + j];
