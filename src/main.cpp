@@ -1,8 +1,13 @@
 #include "avx2.hpp"
 #include "scalar.hpp"
+#ifdef GRADSTEP_HAS_CUDA
+#include "cuda.hpp"
+#endif
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <functional>
+#include <memory>
 #include <string>
 
 // Best of 10 runs, in ms. The minimum is the least disturbed by other processes
@@ -71,6 +76,23 @@ int main(int argc, char** argv) {
     } else {
         printf("CPU without AVX2: skipping avx2\n");
     }
+
+#ifdef GRADSTEP_HAS_CUDA
+    // The CudaGrad object outlives the lambda (it captures the pointer), and it
+    // uploads the dataset once, before the timed runs.
+    std::unique_ptr<CudaGrad> cuda_grad;
+    if (cuda_available()) {
+        try {
+            cuda_grad = std::make_unique<CudaGrad>(d);
+            versions.push_back({"cuda", [&](const float* w, float* g) { cuda_grad->compute(w, g); }});
+            printf("GPU: %s\n", cuda_device_name());
+        } catch (const std::exception& e) {
+            printf("CUDA unavailable: %s\n", e.what());
+        }
+    } else {
+        printf("No CUDA device: skipping cuda\n");
+    }
+#endif
 
     std::vector<float> w(P, 0.0f);
     auto ref = reference_grad(d, w);
